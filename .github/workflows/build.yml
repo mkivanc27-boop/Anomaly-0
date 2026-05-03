@@ -1,4 +1,4 @@
-name: Build Anomaly Mod
+concurrency: name: Build Anomaly Mod
 on: [push]
 jobs:
   build:
@@ -13,10 +13,11 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
       - name: Build with Gradle
-        run: chmod +x gradlew && ./gradlew build
+        # gradlew yerine doğrudan 'gradle' komutunu kullanıyoruz, dosya aramasına gerek kalmıyor
+        run: gradle build 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Anomaly-Ultimate-JAR
+          name: Anomaly-Ultimate-Mod
           path: build/libs/*.jar
           
