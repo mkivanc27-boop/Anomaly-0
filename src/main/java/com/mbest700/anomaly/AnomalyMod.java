@@ -1,6 +1,6 @@
 package com.mbest700.anomaly;
 
-import com.mbest700.anomaly.mixin.IEntityData;
+import com.mbest700.anomaly.IEntityData;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
@@ -170,4 +170,4 @@ public class AnomalyMod implements ModInitializer {
         @Override
         public boolean isCustomNameVisible() { return false; }
     }
-}
+                }
