@@ -18,6 +18,7 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Zombie;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -32,6 +33,9 @@ public class AnomalyMod implements ModInitializer {
         "Neredesin?", "O geliyor...", "Kaç!", "Arkana bakma",
         "Yardım et...", "Duyuyor musun?", "Buradayım", "Gel buraya", "Sessiz ol"
     };
+
+    // Debug mesajları
+    private static final String PREFIX = "§8[§cAnomaly§8] §7";
 
     public static final EntityType<AnomalyEntity> ANOMALY = Registry.register(
             BuiltInRegistries.ENTITY_TYPE,
@@ -63,34 +67,62 @@ public class AnomalyMod implements ModInitializer {
         float insanityRate = isNight ? 2.0f : 1.0f;
 
         if (isNear) {
-            float dist = nearList.get(0).distanceTo(p);
+            AnomalyEntity anomaly = nearList.get(0);
+            float dist = anomaly.distanceTo(p);
             data.setInsanity(data.getInsanity() + (dist < 30 ? 1.5f : 0.5f) * insanityRate);
 
+            // Bakıyor mu kontrolü
+            Vec3 look = p.getViewVector(1.0f).normalize();
+            Vec3 toEnt = new Vec3(
+                anomaly.getX() - p.getX(), 0, anomaly.getZ() - p.getZ()).normalize();
+            boolean playerLookingAtAnomaly = look.dot(toEnt) > 0.7;
+
+            // DEBUG: Mesafe bildirimi (her 5 saniyede bir)
+            if (time % 100 == 0) {
+                String distMsg = dist < 10 ? "§4ÇOK YAKIN" : dist < 20 ? "§cYAKIN" : dist < 40 ? "§eORTA" : "§aUZAK";
+                p.sendSystemMessage(Component.literal(PREFIX + "Anomaly mesafesi: " + distMsg + " §7(" + (int)dist + " blok)"));
+            }
+
+            // DEBUG: İzleme bildirimi
+            if (playerLookingAtAnomaly && time % 40 == 0) {
+                p.sendSystemMessage(Component.literal(PREFIX + "Anomaly'ye bakıyorsun — o dondu."));
+            }
+
+            // DEBUG: Anomaly hareket ediyor mu
+            if (!playerLookingAtAnomaly && time % 60 == 0) {
+                p.sendSystemMessage(Component.literal(PREFIX + "§cAnomaly sana doğru geliyor!"));
+            }
+
+            // Ses efekti
             if (data.getInsanity() >= 40 && time % 60 == 0) {
                 l.playSound(null, p.blockPosition(), SoundEvents.WARDEN_AMBIENT, SoundSource.AMBIENT, 0.8f, 0.1f);
             }
 
+            // Blok bozulması
             if (data.getInsanity() >= 60 && time % 15 == 0) {
                 BlockPos target = p.blockPosition().offset(
                         l.random.nextInt(10) - 5, -1, l.random.nextInt(10) - 5);
                 if (!l.getBlockState(target).isAir() && history.size() < 100) {
                     history.putIfAbsent(target.immutable(), l.getBlockState(target));
                     l.setBlockAndUpdate(target, Blocks.NETHERRACK.defaultBlockState());
+                    if (time % 60 == 0) {
+                        p.sendSystemMessage(Component.literal(PREFIX + "§5Çevren bozuluyor..."));
+                    }
                 }
             }
 
+            // %80+ ışınlanma
             if (data.getInsanity() >= 80 && time % 100 == 0) {
-                AnomalyEntity anomaly = nearList.get(0);
-                Vec3 look = p.getViewVector(1.0f).normalize();
                 double tpX = p.getX() + look.x * 5;
                 double tpY = p.getY();
                 double tpZ = p.getZ() + look.z * 5;
                 anomaly.teleportTo(tpX, tpY, tpZ);
                 l.playSound(null, p.blockPosition(), SoundEvents.ENDERMAN_TELEPORT, SoundSource.HOSTILE, 1.0f, 0.5f);
+                p.sendSystemMessage(Component.literal(PREFIX + "§4Anomaly önüne ışınlandı!"));
             }
 
+            // Gündüz kaçış
             if (l.isDay()) {
-                AnomalyEntity anomaly = nearList.get(0);
                 anomaly.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0.05);
                 if (time % 200 == 0) {
                     BlockPos safePos = anomaly.blockPosition();
@@ -98,6 +130,7 @@ public class AnomalyMod implements ModInitializer {
                         BlockPos check = safePos.below(i);
                         if (!l.getBlockState(check).isAir() && l.getBlockState(check.above()).isAir()) {
                             anomaly.teleportTo(check.getX(), check.above().getY(), check.getZ());
+                            p.sendSystemMessage(Component.literal(PREFIX + "§eGündüz — Anomaly gölgeye kaçıyor."));
                             break;
                         }
                     }
@@ -107,14 +140,17 @@ public class AnomalyMod implements ModInitializer {
         } else {
             data.setInsanity(Math.max(0, data.getInsanity() - 0.2f));
 
+            // Otomatik spawn
             if (data.getInsanity() > 50 && time > spawnCooldown && l.random.nextFloat() < 0.005) {
                 BlockPos spawnPos = p.blockPosition().offset(20, 0, 20);
                 AnomalyEntity e = new AnomalyEntity(ANOMALY, l);
                 e.setPos(spawnPos.getX(), spawnPos.getY(), spawnPos.getZ());
                 l.addFreshEntity(e);
                 spawnCooldown = time + 5000;
+                p.sendSystemMessage(Component.literal(PREFIX + "§4Anomaly yakında bir yerde ortaya çıktı..."));
             }
 
+            // Blok geri alma
             if (time % 40 == 0 && !history.isEmpty()) {
                 BlockPos bp = history.keySet().iterator().next();
                 BlockState original = history.remove(bp);
@@ -124,6 +160,7 @@ public class AnomalyMod implements ModInitializer {
             }
         }
 
+        // Multiplayer sahte mesaj
         if (s.getPlayerList().getPlayerCount() >= 2 && time % 300 == 0 && data.getInsanity() > 55) {
             String randomMsg = FAKE_MESSAGES[l.random.nextInt(FAKE_MESSAGES.length)];
             s.getPlayerList().getPlayers().stream()
@@ -134,6 +171,7 @@ public class AnomalyMod implements ModInitializer {
                                     "<" + friend.getName().getString() + "> " + randomMsg)));
         }
 
+        // Action bar — insanity göstergesi
         String color = data.getInsanity() > 80 ? "§4" : data.getInsanity() > 50 ? "§c" : "§a";
         p.displayClientMessage(Component.literal(color + "Zihinsel Durum: %" + (int) data.getInsanity()), true);
 
@@ -152,6 +190,11 @@ public class AnomalyMod implements ModInitializer {
         }
 
         @Override
+        protected void registerGoals() {
+            super.registerGoals();
+        }
+
+        @Override
         public void aiStep() {
             super.aiStep();
             if (this.level().isClientSide) return;
@@ -167,7 +210,15 @@ public class AnomalyMod implements ModInitializer {
             }
         }
 
+        // Yumurta ile spawn edilebilmesi için
+        @Override
+        public boolean requiresCustomPersistence() { return true; }
+
         @Override
         public boolean isCustomNameVisible() { return false; }
+
+        // Güneşte yanmasın (test için)
+        @Override
+        protected boolean isSunSensitive() { return false; }
     }
-                }
+}
