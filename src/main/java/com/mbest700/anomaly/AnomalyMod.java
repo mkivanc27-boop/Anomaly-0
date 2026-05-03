@@ -4,10 +4,8 @@ import com.mbest700.anomaly.mixin.IEntityData;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
-import net.fabricmc.fabric.api.object.builder.v1.entity.FabricEntityTypeBuilder;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Registry;
-import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -19,10 +17,7 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.entity.ai.goal.*;
-import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
 import net.minecraft.world.entity.monster.Zombie;
-import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -33,23 +28,16 @@ import java.util.*;
 public class AnomalyMod implements ModInitializer {
     public static final String MOD_ID = "anomaly_0";
 
-    // Sahte mesaj listesi
     private static final String[] FAKE_MESSAGES = {
-        "Neredesin?",
-        "O geliyor...",
-        "Kaç!",
-        "Arkana bakma",
-        "Yardım et...",
-        "Duyuyor musun?",
-        "Buradayım",
-        "Gel buraya",
-        "Sessiz ol"
+        "Neredesin?", "O geliyor...", "Kaç!", "Arkana bakma",
+        "Yardım et...", "Duyuyor musun?", "Buradayım", "Gel buraya", "Sessiz ol"
     };
 
-    public static final EntityType<AnomalyEntity> ANOMALY = Registry.register(BuiltInRegistries.ENTITY_TYPE,
-            new ResourceLocation(MOD_ID, "anomaly"),
-            FabricEntityTypeBuilder.create(MobCategory.MONSTER, AnomalyEntity::new)
-                    .dimensions(EntityDimensions.fixed(0.6f, 1.9f)).build());
+    public static final EntityType<AnomalyEntity> ANOMALY = Registry.register(
+            BuiltInRegistries.ENTITY_TYPE,
+            ResourceLocation.fromNamespaceAndPath(MOD_ID, "anomaly"),
+            EntityType.Builder.of(AnomalyEntity::new, MobCategory.MONSTER)
+                    .sized(0.6f, 1.9f).build());
 
     private static final Map<BlockPos, BlockState> history = new LinkedHashMap<>();
     private static long spawnCooldown = 0;
@@ -71,21 +59,17 @@ public class AnomalyMod implements ModInitializer {
         List<AnomalyEntity> nearList = l.getEntitiesOfClass(AnomalyEntity.class, p.getBoundingBox().inflate(64));
         boolean isNear = !nearList.isEmpty();
 
-        // Gece/Gündüz çarpanı
         boolean isNight = !l.isDay();
         float insanityRate = isNight ? 2.0f : 1.0f;
 
-        // --- DELİLİK MANTIĞI ---
         if (isNear) {
             float dist = nearList.get(0).distanceTo(p);
             data.setInsanity(data.getInsanity() + (dist < 30 ? 1.5f : 0.5f) * insanityRate);
 
-            // Psikolojik Korku: Nefes sesi
             if (data.getInsanity() >= 40 && time % 60 == 0) {
                 l.playSound(null, p.blockPosition(), SoundEvents.WARDEN_AMBIENT, SoundSource.AMBIENT, 0.8f, 0.1f);
             }
 
-            // Dünya Bozulması
             if (data.getInsanity() >= 60 && time % 15 == 0) {
                 BlockPos target = p.blockPosition().offset(
                         l.random.nextInt(10) - 5, -1, l.random.nextInt(10) - 5);
@@ -95,7 +79,6 @@ public class AnomalyMod implements ModInitializer {
                 }
             }
 
-            // %80+ → Anomaly oyuncunun ÖNÜNE ışınlanır
             if (data.getInsanity() >= 80 && time % 100 == 0) {
                 AnomalyEntity anomaly = nearList.get(0);
                 Vec3 look = p.getViewVector(1.0f).normalize();
@@ -103,14 +86,27 @@ public class AnomalyMod implements ModInitializer {
                 double tpY = p.getY();
                 double tpZ = p.getZ() + look.z * 5;
                 anomaly.teleportTo(tpX, tpY, tpZ);
-                // Işınlanınca korku sesi
                 l.playSound(null, p.blockPosition(), SoundEvents.ENDERMAN_TELEPORT, SoundSource.HOSTILE, 1.0f, 0.5f);
+            }
+
+            if (l.isDay()) {
+                AnomalyEntity anomaly = nearList.get(0);
+                anomaly.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0.05);
+                if (time % 200 == 0) {
+                    BlockPos safePos = anomaly.blockPosition();
+                    for (int i = 1; i <= 10; i++) {
+                        BlockPos check = safePos.below(i);
+                        if (!l.getBlockState(check).isAir() && l.getBlockState(check.above()).isAir()) {
+                            anomaly.teleportTo(check.getX(), check.above().getY(), check.getZ());
+                            break;
+                        }
+                    }
+                }
             }
 
         } else {
             data.setInsanity(Math.max(0, data.getInsanity() - 0.2f));
 
-            // Otomatik Spawn
             if (data.getInsanity() > 50 && time > spawnCooldown && l.random.nextFloat() < 0.005) {
                 BlockPos spawnPos = p.blockPosition().offset(20, 0, 20);
                 AnomalyEntity e = new AnomalyEntity(ANOMALY, l);
@@ -119,25 +115,15 @@ public class AnomalyMod implements ModInitializer {
                 spawnCooldown = time + 5000;
             }
 
-            // Blokları geri al
             if (time % 40 == 0 && !history.isEmpty()) {
                 BlockPos bp = history.keySet().iterator().next();
-                l.setBlockAndUpdate(bp, history.remove(bp));
+                BlockState original = history.remove(bp);
+                if (l.random.nextFloat() > 0.20f) {
+                    l.setBlockAndUpdate(bp, original);
+                }
             }
         }
 
-        // Gündüz Anomaly güneşten kaçar
-        if (l.isDay() && isNear) {
-            AnomalyEntity anomaly = nearList.get(0);
-            // Güneş varsa Anomaly yere gömülü gibi yavaşlar ve kaçar
-            anomaly.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0.05);
-            if (time % 200 == 0) {
-                // Gölgeye ışınlan (yeraltına doğru)
-                anomaly.teleportTo(anomaly.getX(), anomaly.getY() - 10, anomaly.getZ());
-            }
-        }
-
-        // --- MULTIPLAYER SAHTE MESAJLAR ---
         if (s.getPlayerList().getPlayerCount() >= 2 && time % 300 == 0 && data.getInsanity() > 55) {
             String randomMsg = FAKE_MESSAGES[l.random.nextInt(FAKE_MESSAGES.length)];
             s.getPlayerList().getPlayers().stream()
@@ -148,7 +134,6 @@ public class AnomalyMod implements ModInitializer {
                                     "<" + friend.getName().getString() + "> " + randomMsg)));
         }
 
-        // --- UI ---
         String color = data.getInsanity() > 80 ? "§4" : data.getInsanity() > 50 ? "§c" : "§a";
         p.displayClientMessage(Component.literal(color + "Zihinsel Durum: %" + (int) data.getInsanity()), true);
 
@@ -157,7 +142,6 @@ public class AnomalyMod implements ModInitializer {
         }
     }
 
-    // --- ANOMALY VARLIĞI ---
     public static class AnomalyEntity extends Zombie {
         public AnomalyEntity(EntityType<? extends Zombie> t, Level l) { super(t, l); }
 
@@ -174,19 +158,16 @@ public class AnomalyMod implements ModInitializer {
 
             ServerPlayer target = (ServerPlayer) getTarget();
             if (target != null) {
-                this.setCustomName(target.getName()); // İsim taklit
+                this.setCustomName(target.getName());
 
-                // Bakış Kontrolü (Weeping Angel)
                 Vec3 look = target.getViewVector(1.0f).normalize();
-                Vec3 toEnt = new Vec3(
-                        getX() - target.getX(), 0, getZ() - target.getZ()).normalize();
+                Vec3 toEnt = new Vec3(getX() - target.getX(), 0, getZ() - target.getZ()).normalize();
                 boolean isLooking = look.dot(toEnt) > 0.5;
                 getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(isLooking ? 0.05 : 0.9);
             }
         }
 
-        // Skin için model: Zombie değil Player model kullan
         @Override
-        public boolean isCustomNameVisible() { return false; } // İsim tag'i gizli
+        public boolean isCustomNameVisible() { return false; }
     }
 }
