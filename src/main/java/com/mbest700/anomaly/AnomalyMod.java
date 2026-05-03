@@ -13,7 +13,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -40,7 +39,6 @@ public class AnomalyMod implements ModInitializer {
                     .dimensions(EntityDimensions.fixed(0.6f, 1.9f)).build());
 
     private static final Map<BlockPos, BlockState> history = new LinkedHashMap<>();
-    private static final Set<BlockPos> permanent = new HashSet<>();
     private static long spawnCooldown = 0;
 
     @Override
@@ -49,77 +47,70 @@ public class AnomalyMod implements ModInitializer {
         
         ServerTickEvents.START_SERVER_TICK.register(server -> {
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                updateSystem(player, (ServerLevel) player.level(), server);
+                updateAnomalySystem(player, (ServerLevel) player.level(), server);
             }
         });
     }
 
-    private void updateSystem(ServerPlayer p, ServerLevel l, net.minecraft.server.MinecraftServer s) {
+    private void updateAnomalySystem(ServerPlayer p, ServerLevel l, net.minecraft.server.MinecraftServer s) {
         IEntityData data = (IEntityData) p;
         long time = l.getGameTime();
         List<AnomalyEntity> nearList = l.getEntitiesOfClass(AnomalyEntity.class, p.getBoundingBox().inflate(64));
         boolean isNear = !nearList.isEmpty();
 
-        // Delilik Mantığı
+        // --- DELİLİK (INSANITY) MANTIĞI ---
         if (isNear) {
-            data.setInsanity(data.getInsanity() + (nearList.get(0).distanceTo(p) < 35 ? 1.3f : 0.4f));
-            if (data.getInsanity() >= 40 && time % 50 == 0) playParanoiaSound(p, l);
-            if (data.getInsanity() >= 65 && time % 10 == 0) corrupt(p, l, (int)data.getInsanity());
+            data.setInsanity(data.getInsanity() + (nearList.get(0).distanceTo(p) < 30 ? 1.5f : 0.5f));
+            
+            // Psikolojik Korku: Arkadan gelen nefes sesleri
+            if (data.getInsanity() >= 40 && time % 60 == 0) {
+                l.playSound(null, p.blockPosition(), SoundEvents.HOSTILE_BREATH, SoundSource.AMBIENT, 0.8f, 0.1f);
+            }
+            
+            // Dünya Bozulması (Netherrack'e dönüşme)
+            if (data.getInsanity() >= 60 && time % 15 == 0) {
+                BlockPos target = p.blockPosition().offset(l.random.nextInt(10)-5, -1, l.random.nextInt(10)-5);
+                if (!l.getBlockState(target).isAir() && history.size() < 100) {
+                    history.putIfAbsent(target.immutable(), l.getBlockState(target));
+                    l.setBlockAndUpdate(target, Blocks.NETHERRACK.defaultBlockState());
+                }
+            }
         } else {
-            data.setInsanity(Math.max(0, data.getInsanity() - 0.15f));
-            if (data.getInsanity() > 55 && time > spawnCooldown && l.random.nextFloat() < 0.003) {
-                spawnAnomaly(p, l); 
+            data.setInsanity(Math.max(0, data.getInsanity() - 0.2f));
+            // Otomatik Spawn
+            if (data.getInsanity() > 50 && time > spawnCooldown && l.random.nextFloat() < 0.005) {
+                BlockPos spawnPos = p.blockPosition().offset(20, 0, 20);
+                AnomalyEntity e = new AnomalyEntity(ANOMALY, l);
+                e.setPos(spawnPos.getX(), spawnPos.getY(), spawnPos.getZ());
+                l.addFreshEntity(e);
                 spawnCooldown = time + 5000;
             }
-            if (time % 35 == 0) restore(l);
+            // Blokları eski haline döndür
+            if (time % 40 == 0 && !history.isEmpty()) {
+                BlockPos bp = history.keySet().iterator().next();
+                l.setBlockAndUpdate(bp, history.remove(bp));
+            }
         }
 
-        // Psikolojik Korku: Arkadaşının ismini kullanarak mesaj atma
-        if (s.getPlayerList().getPlayerCount() >= 2 && time % 250 == 0 && data.getInsanity() > 50) {
-            s.getPlayerList().getPlayers().stream().filter(o -> o != p).findAny().ifPresent(f -> 
-                p.sendSystemMessage(Component.literal("<" + f.getName().getString() + "> " + "Neden arkana bakmıyorsun?")));
+        // --- MULTIPLAYER SAHTE MESAJLAR ---
+        if (s.getPlayerList().getPlayerCount() >= 2 && time % 300 == 0 && data.getInsanity() > 55) {
+            s.getPlayerList().getPlayers().stream().filter(o -> o != p).findAny().ifPresent(friend -> 
+                p.sendSystemMessage(Component.literal("<" + friend.getName().getString() + "> " + "Yardım et...")));
         }
 
-        // Ekran Efektleri
-        String color = data.getInsanity() > 80 ? "§4" : data.getInsanity() > 40 ? "§e" : "§a";
-        p.displayClientMessage(Component.literal(color + "Insanity: " + (int)data.getInsanity() + "/100"), true);
+        // --- UI VE KRİTİK EFEKTLER ---
+        String color = data.getInsanity() > 80 ? "§4" : data.getInsanity() > 50 ? "§c" : "§a";
+        p.displayClientMessage(Component.literal(color + "Zihinsel Durum: %" + (int)data.getInsanity()), true);
 
-        if (data.getInsanity() >= 85 && l.random.nextFloat() < 0.04) {
+        if (data.getInsanity() >= 85 && l.random.nextFloat() < 0.05) {
             p.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 20, 0, false, false));
         }
     }
 
-    private void playParanoiaSound(ServerPlayer p, ServerLevel l) {
-        l.playSound(null, p.blockPosition(), SoundEvents.HOSTILE_BREATH, SoundSource.AMBIENT, 0.7f, 0.1f);
-    }
-
-    private void spawnAnomaly(ServerPlayer p, ServerLevel l) {
-        BlockPos pos = p.blockPosition().offset(20 + l.random.nextInt(5), 0, 20 + l.random.nextInt(5));
-        AnomalyEntity e = new AnomalyEntity(ANOMALY, l);
-        e.setPos(pos.getX(), pos.getY(), pos.getZ());
-        l.addFreshEntity(e);
-    }
-
-    private void corrupt(ServerPlayer p, ServerLevel l, int ins) {
-        BlockPos target = p.blockPosition().offset(l.random.nextInt(8)-4, -1, l.random.nextInt(8)-4);
-        if (!l.getBlockState(target).isAir() && history.size() < 100) {
-            history.putIfAbsent(target.immutable(), l.getBlockState(target));
-            l.setBlockAndUpdate(target, Blocks.NETHERRACK.defaultBlockState());
-        }
-    }
-
-    private void restore(ServerLevel l) {
-        Iterator<Map.Entry<BlockPos, BlockState>> it = history.entrySet().iterator();
-        if (it.hasNext()) {
-            Map.Entry<BlockPos, BlockState> e = it.next();
-            l.setBlockAndUpdate(e.getKey(), e.getValue());
-            it.remove();
-        }
-    }
-
-    // --- ANOMALY ENTITY SINIFI ---
+    // --- ANOMALY VARLIĞI ---
     public static class AnomalyEntity extends Zombie {
         public AnomalyEntity(EntityType<? extends Zombie> t, Level l) { super(t, l); }
+        
         public static net.minecraft.world.entity.ai.attributes.AttributeSupplier.Builder createAttributes() {
             return Zombie.createAttributes().add(Attributes.MAX_HEALTH, 600).add(Attributes.MOVEMENT_SPEED, 0.35);
         }
@@ -130,12 +121,14 @@ public class AnomalyMod implements ModInitializer {
             if (this.level().isClientSide) return;
             ServerPlayer target = (ServerPlayer) getTarget();
             if (target != null) {
-                this.setCustomName(target.getName());
+                this.setCustomName(target.getName()); // İsmini taklit et
+                
+                // Bakış Kontrolü (Ağlayan Melek mekaniği)
                 Vec3 look = target.getViewVector(1.0f).normalize();
                 Vec3 toEnt = new Vec3(getX()-target.getX(), 0, getZ()-target.getZ()).normalize();
-                boolean isLooking = look.dot(toEnt) > 0.45;
-                getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(isLooking ? 0.08 : 0.9);
+                boolean isLooking = look.dot(toEnt) > 0.5;
+                getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(isLooking ? 0.05 : 0.9);
             }
         }
     }
-            }
+    }
