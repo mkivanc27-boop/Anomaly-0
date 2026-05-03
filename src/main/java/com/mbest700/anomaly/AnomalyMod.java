@@ -30,8 +30,11 @@ import net.minecraft.world.phys.Vec3;
 import java.util.*;
 
 public class AnomalyMod implements ModInitializer {
+    // MOD_ID'yi senin için tanımladım
+    public static final String MOD_ID = "anomaly_0";
+
     public static final EntityType<AnomalyEntity> ANOMALY = Registry.register(BuiltInRegistries.ENTITY_TYPE,
-            new ResourceLocation("anomaly_0", "anomaly"),
+            new ResourceLocation(MOD_ID, "anomaly"), // Burayı düzelttim
             FabricEntityTypeBuilder.create(MobCategory.MONSTER, AnomalyEntity::new).dimensions(EntityDimensions.fixed(0.6f, 1.9f)).build());
 
     private static final Map<BlockPos, BlockState> history = new LinkedHashMap<>();
@@ -57,6 +60,7 @@ public class AnomalyMod implements ModInitializer {
         // Insanity Logic
         if (isNear) {
             data.setInsanity(data.getInsanity() + (nearList.get(0).distanceTo(p) < 35 ? 1.2f : 0.3f));
+            if (data.getInsanity() >= 40 && time % 50 == 0) playParanoiaSound(p, l); // Korku sesleri
             if (data.getInsanity() >= 50 && time % 40 == 0) extinguishLights(p, l);
             if (data.getInsanity() >= 65 && time % (data.getInsanity() >= 75 ? 8 : 15) == 0) corrupt(p, l, data.getInsanity() >= 75 ? 2 : 1);
         } else {
@@ -71,11 +75,14 @@ public class AnomalyMod implements ModInitializer {
         if (s.getPlayerList().getPlayerCount() >= 2 && time % 200 == 0 && data.getInsanity() > 50) simulateChat(p, s);
         if (data.getInsanity() > 40 && time % 300 == 0 && l.random.nextFloat() < 0.4) spawnDecoy(p, l);
 
-        // UI & Effects
+        // UI & Psychological Effects
         updateUI(p, data.getInsanity(), isNear, time);
+        if (data.getInsanity() >= 80) p.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 40, 0, false, false)); // Solgun Görüş
+
         if (data.getInsanity() >= 100) {
             p.addEffect(new MobEffectInstance(MobEffects.DARKNESS, 100, 0));
             p.hurt(l.damageSources().magic(), 10f);
+            l.playSound(null, p.blockPosition(), SoundEvents.ENDERMAN_SCREAM, SoundSource.PLAYERS, 1.0f, 0.5f); // Son çığlık
             data.setInsanity(80);
         }
     }
@@ -84,12 +91,24 @@ public class AnomalyMod implements ModInitializer {
         String c = ins > 80 ? "§4" : ins > 60 ? "§c" : ins > 40 ? "§e" : "§a";
         String m = c + "Insanity: " + (int)ins + "/100" + (ins > 80 ? " §l⚠" : "");
         if (ins > 60 && near && (t / 10 % 2 == 0)) m = "§4§lERR_MIMIC_DETECTED";
+        
+        // Insanity 90+ ise ekranın yanıp sönmesi
+        if (ins >= 90 && (t / 2 % 2 == 0)) m = "§4§k||||||||||||||"; 
+            
         p.displayClientMessage(Component.literal(m), true);
     }
 
+    private void playParanoiaSound(ServerPlayer p, ServerLevel l) {
+        // Rastgele korku sesleri: Enderman bakışı, wither idle, nefes alma sesi, cam kırılması
+        SoundEvent[] sounds = {SoundEvents.ENDERMAN_STARE, SoundEvents.WITHER_AMBIENT, SoundEvents.HOSTILE_BREATH, SoundEvents.GLASS_BREAK};
+        l.playSound(null, p.blockPosition(), sounds[l.random.nextInt(sounds.length)], SoundSource.AMBIENT, 0.5f, 0.5f);
+    }
+
     private void simulateChat(ServerPlayer p, net.minecraft.server.MinecraftServer s) {
+        // Arkadaşından gelen daha ürkütücü mesajlar
+        String[] msgs = {"Arkana bakma...", "Onu görüyor musun?", "Neden bana öyle bakıyorsun?", "Gerçek değil...", "Kurtar beni!"};
         s.getPlayerList().getPlayers().stream().filter(o -> o != p).findAny().ifPresent(f -> 
-            p.sendSystemMessage(Component.literal("<" + f.getName().getString() + "> " + "Yardım et!")));
+            p.sendSystemMessage(Component.literal("<" + f.getName().getString() + "> " + msgs[s.getRandom().nextInt(msgs.length)])));
     }
 
     private void spawnAnomaly(ServerPlayer p, ServerLevel l) {
@@ -116,7 +135,11 @@ public class AnomalyMod implements ModInitializer {
             if (!l.getBlockState(target).isAir() && history.size() < 200) {
                 history.putIfAbsent(target.immutable(), l.getBlockState(target));
                 if (l.random.nextFloat() < 0.2) permanent.add(target);
-                l.setBlockAndUpdate(target, Blocks.NETHERRACK.defaultBlockState());
+                
+                // Psikolojik bozulma: Insanity yüksekse blokların "netherrack" yerine rastgele bozuk bloklara dönüşmesi (Glich hissi)
+                float ins = ((IEntityData)p).getInsanity();
+                BlockState glitchBlock = ins >= 80 && l.random.nextBoolean() ? Blocks.GLOWSTONE.defaultBlockState() : Blocks.NETHERRACK.defaultBlockState();
+                l.setBlockAndUpdate(target, glitchBlock);
             }
         }
     }
@@ -142,6 +165,14 @@ public class AnomalyMod implements ModInitializer {
             this.goalSelector.addGoal(3, new MeleeAttackGoal(this, 1.2, false));
             this.targetSelector.addGoal(1, new NearestAttackableTargetGoal<>(this, ServerPlayer.class, true));
         }
+        
+        // PAYLAŞTIĞIN SKİNİ BURADA UYGULUYORUZ
+        @Override
+        public ResourceLocation getTextureLocation() {
+            // Skini 'src/main/resources/assets/anomaly_0/textures/entity/anomaly.png' klasörüne atmalısın.
+            return new ResourceLocation(AnomalyMod.MOD_ID, "textures/entity/anomaly.png");
+        }
+
         @Override public void aiStep() {
             super.aiStep();
             if (this.level().isClientSide) return;
@@ -174,5 +205,4 @@ public class AnomalyMod implements ModInitializer {
         }
         @Override public boolean fireImmune() { return true; }
     }
-                                  }
-                      
+}
