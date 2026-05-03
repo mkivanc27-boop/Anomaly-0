@@ -33,6 +33,19 @@ import java.util.*;
 public class AnomalyMod implements ModInitializer {
     public static final String MOD_ID = "anomaly_0";
 
+    // Sahte mesaj listesi
+    private static final String[] FAKE_MESSAGES = {
+        "Neredesin?",
+        "O geliyor...",
+        "Kaç!",
+        "Arkana bakma",
+        "Yardım et...",
+        "Duyuyor musun?",
+        "Buradayım",
+        "Gel buraya",
+        "Sessiz ol"
+    };
+
     public static final EntityType<AnomalyEntity> ANOMALY = Registry.register(BuiltInRegistries.ENTITY_TYPE,
             new ResourceLocation(MOD_ID, "anomaly"),
             FabricEntityTypeBuilder.create(MobCategory.MONSTER, AnomalyEntity::new)
@@ -44,7 +57,7 @@ public class AnomalyMod implements ModInitializer {
     @Override
     public void onInitialize() {
         FabricDefaultAttributeRegistry.register(ANOMALY, AnomalyEntity.createAttributes());
-        
+
         ServerTickEvents.START_SERVER_TICK.register(server -> {
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
                 updateAnomalySystem(player, (ServerLevel) player.level(), server);
@@ -58,25 +71,45 @@ public class AnomalyMod implements ModInitializer {
         List<AnomalyEntity> nearList = l.getEntitiesOfClass(AnomalyEntity.class, p.getBoundingBox().inflate(64));
         boolean isNear = !nearList.isEmpty();
 
-        // --- DELİLİK (INSANITY) MANTIĞI ---
+        // Gece/Gündüz çarpanı
+        boolean isNight = !l.isDay();
+        float insanityRate = isNight ? 2.0f : 1.0f;
+
+        // --- DELİLİK MANTIĞI ---
         if (isNear) {
-            data.setInsanity(data.getInsanity() + (nearList.get(0).distanceTo(p) < 30 ? 1.5f : 0.5f));
-            
-            // Psikolojik Korku: Arkadan gelen nefes sesleri
+            float dist = nearList.get(0).distanceTo(p);
+            data.setInsanity(data.getInsanity() + (dist < 30 ? 1.5f : 0.5f) * insanityRate);
+
+            // Psikolojik Korku: Nefes sesi
             if (data.getInsanity() >= 40 && time % 60 == 0) {
-                l.playSound(null, p.blockPosition(), SoundEvents.HOSTILE_BREATH, SoundSource.AMBIENT, 0.8f, 0.1f);
+                l.playSound(null, p.blockPosition(), SoundEvents.WARDEN_AMBIENT, SoundSource.AMBIENT, 0.8f, 0.1f);
             }
-            
-            // Dünya Bozulması (Netherrack'e dönüşme)
+
+            // Dünya Bozulması
             if (data.getInsanity() >= 60 && time % 15 == 0) {
-                BlockPos target = p.blockPosition().offset(l.random.nextInt(10)-5, -1, l.random.nextInt(10)-5);
+                BlockPos target = p.blockPosition().offset(
+                        l.random.nextInt(10) - 5, -1, l.random.nextInt(10) - 5);
                 if (!l.getBlockState(target).isAir() && history.size() < 100) {
                     history.putIfAbsent(target.immutable(), l.getBlockState(target));
                     l.setBlockAndUpdate(target, Blocks.NETHERRACK.defaultBlockState());
                 }
             }
+
+            // %80+ → Anomaly oyuncunun ÖNÜNE ışınlanır
+            if (data.getInsanity() >= 80 && time % 100 == 0) {
+                AnomalyEntity anomaly = nearList.get(0);
+                Vec3 look = p.getViewVector(1.0f).normalize();
+                double tpX = p.getX() + look.x * 5;
+                double tpY = p.getY();
+                double tpZ = p.getZ() + look.z * 5;
+                anomaly.teleportTo(tpX, tpY, tpZ);
+                // Işınlanınca korku sesi
+                l.playSound(null, p.blockPosition(), SoundEvents.ENDERMAN_TELEPORT, SoundSource.HOSTILE, 1.0f, 0.5f);
+            }
+
         } else {
             data.setInsanity(Math.max(0, data.getInsanity() - 0.2f));
+
             // Otomatik Spawn
             if (data.getInsanity() > 50 && time > spawnCooldown && l.random.nextFloat() < 0.005) {
                 BlockPos spawnPos = p.blockPosition().offset(20, 0, 20);
@@ -85,22 +118,39 @@ public class AnomalyMod implements ModInitializer {
                 l.addFreshEntity(e);
                 spawnCooldown = time + 5000;
             }
-            // Blokları eski haline döndür
+
+            // Blokları geri al
             if (time % 40 == 0 && !history.isEmpty()) {
                 BlockPos bp = history.keySet().iterator().next();
                 l.setBlockAndUpdate(bp, history.remove(bp));
             }
         }
 
-        // --- MULTIPLAYER SAHTE MESAJLAR ---
-        if (s.getPlayerList().getPlayerCount() >= 2 && time % 300 == 0 && data.getInsanity() > 55) {
-            s.getPlayerList().getPlayers().stream().filter(o -> o != p).findAny().ifPresent(friend -> 
-                p.sendSystemMessage(Component.literal("<" + friend.getName().getString() + "> " + "Yardım et...")));
+        // Gündüz Anomaly güneşten kaçar
+        if (l.isDay() && isNear) {
+            AnomalyEntity anomaly = nearList.get(0);
+            // Güneş varsa Anomaly yere gömülü gibi yavaşlar ve kaçar
+            anomaly.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0.05);
+            if (time % 200 == 0) {
+                // Gölgeye ışınlan (yeraltına doğru)
+                anomaly.teleportTo(anomaly.getX(), anomaly.getY() - 10, anomaly.getZ());
+            }
         }
 
-        // --- UI VE KRİTİK EFEKTLER ---
+        // --- MULTIPLAYER SAHTE MESAJLAR ---
+        if (s.getPlayerList().getPlayerCount() >= 2 && time % 300 == 0 && data.getInsanity() > 55) {
+            String randomMsg = FAKE_MESSAGES[l.random.nextInt(FAKE_MESSAGES.length)];
+            s.getPlayerList().getPlayers().stream()
+                    .filter(o -> o != p)
+                    .findAny()
+                    .ifPresent(friend ->
+                            p.sendSystemMessage(Component.literal(
+                                    "<" + friend.getName().getString() + "> " + randomMsg)));
+        }
+
+        // --- UI ---
         String color = data.getInsanity() > 80 ? "§4" : data.getInsanity() > 50 ? "§c" : "§a";
-        p.displayClientMessage(Component.literal(color + "Zihinsel Durum: %" + (int)data.getInsanity()), true);
+        p.displayClientMessage(Component.literal(color + "Zihinsel Durum: %" + (int) data.getInsanity()), true);
 
         if (data.getInsanity() >= 85 && l.random.nextFloat() < 0.05) {
             p.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 20, 0, false, false));
@@ -110,25 +160,33 @@ public class AnomalyMod implements ModInitializer {
     // --- ANOMALY VARLIĞI ---
     public static class AnomalyEntity extends Zombie {
         public AnomalyEntity(EntityType<? extends Zombie> t, Level l) { super(t, l); }
-        
+
         public static net.minecraft.world.entity.ai.attributes.AttributeSupplier.Builder createAttributes() {
-            return Zombie.createAttributes().add(Attributes.MAX_HEALTH, 600).add(Attributes.MOVEMENT_SPEED, 0.35);
+            return Zombie.createAttributes()
+                    .add(Attributes.MAX_HEALTH, 600)
+                    .add(Attributes.MOVEMENT_SPEED, 0.35);
         }
 
         @Override
         public void aiStep() {
             super.aiStep();
             if (this.level().isClientSide) return;
+
             ServerPlayer target = (ServerPlayer) getTarget();
             if (target != null) {
-                this.setCustomName(target.getName()); // İsmini taklit et
-                
-                // Bakış Kontrolü (Ağlayan Melek mekaniği)
+                this.setCustomName(target.getName()); // İsim taklit
+
+                // Bakış Kontrolü (Weeping Angel)
                 Vec3 look = target.getViewVector(1.0f).normalize();
-                Vec3 toEnt = new Vec3(getX()-target.getX(), 0, getZ()-target.getZ()).normalize();
+                Vec3 toEnt = new Vec3(
+                        getX() - target.getX(), 0, getZ() - target.getZ()).normalize();
                 boolean isLooking = look.dot(toEnt) > 0.5;
                 getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(isLooking ? 0.05 : 0.9);
             }
         }
+
+        // Skin için model: Zombie değil Player model kullan
+        @Override
+        public boolean isCustomNameVisible() { return false; } // İsim tag'i gizli
     }
-    }
+                    }
