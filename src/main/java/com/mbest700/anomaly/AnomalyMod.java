@@ -60,39 +60,49 @@ public class AnomalyMod implements ModInitializer {
         List<AnomalyEntity> nearList = l.getEntitiesOfClass(AnomalyEntity.class, p.getBoundingBox().inflate(64));
         boolean isNear = !nearList.isEmpty();
 
+        // Delilik Mantığı
         if (isNear) {
-            data.setInsanity(data.getInsanity() + (nearList.get(0).distanceTo(p) < 35 ? 1.4f : 0.4f));
-            if (data.getInsanity() >= 40 && time % 55 == 0) {
-                p.playNotifySound(SoundEvents.HOSTILE_BREATH, SoundSource.AMBIENT, 0.5f, 0.1f);
-            }
-            if (data.getInsanity() >= 65 && time % 12 == 0) corrupt(p, l);
+            data.setInsanity(data.getInsanity() + (nearList.get(0).distanceTo(p) < 35 ? 1.3f : 0.4f));
+            if (data.getInsanity() >= 40 && time % 50 == 0) playParanoiaSound(p, l);
+            if (data.getInsanity() >= 65 && time % 10 == 0) corrupt(p, l, (int)data.getInsanity());
         } else {
-            data.setInsanity(data.getInsanity() - 0.2f);
-            if (data.getInsanity() > 50 && time > spawnCooldown && l.random.nextFloat() < 0.002) {
-                spawnAnomaly(p, l);
+            data.setInsanity(Math.max(0, data.getInsanity() - 0.15f));
+            if (data.getInsanity() > 55 && time > spawnCooldown && l.random.nextFloat() < 0.003) {
+                spawnAnomaly(p, l); 
                 spawnCooldown = time + 5000;
             }
-            if (time % 40 == 0) restore(l);
+            if (time % 35 == 0) restore(l);
         }
 
-        if (s.getPlayerList().getPlayerCount() >= 2 && time % 180 == 0 && data.getInsanity() > 50) {
+        // Psikolojik Korku: Arkadaşının ismini kullanarak mesaj atma
+        if (s.getPlayerList().getPlayerCount() >= 2 && time % 250 == 0 && data.getInsanity() > 50) {
             s.getPlayerList().getPlayers().stream().filter(o -> o != p).findAny().ifPresent(f -> 
-                p.sendSystemMessage(Component.literal("<" + f.getName().getString() + "> " + "Arkana bakma...")));
+                p.sendSystemMessage(Component.literal("<" + f.getName().getString() + "> " + "Neden arkana bakmıyorsun?")));
         }
 
-        updateUI(p, data.getInsanity(), isNear, time);
+        // Ekran Efektleri
+        String color = data.getInsanity() > 80 ? "§4" : data.getInsanity() > 40 ? "§e" : "§a";
+        p.displayClientMessage(Component.literal(color + "Insanity: " + (int)data.getInsanity() + "/100"), true);
+
+        if (data.getInsanity() >= 85 && l.random.nextFloat() < 0.04) {
+            p.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 20, 0, false, false));
+        }
     }
 
-    private void updateUI(ServerPlayer p, float ins, boolean near, long t) {
-        String c = ins > 80 ? "§4" : ins > 60 ? "§c" : ins > 40 ? "§e" : "§a";
-        String m = c + "Insanity: " + (int)ins + "/100";
-        if (ins >= 90 && (t / 2 % 2 == 0)) m = "§4§k||||||||||||||";
-        p.displayClientMessage(Component.literal(m), true);
+    private void playParanoiaSound(ServerPlayer p, ServerLevel l) {
+        l.playSound(null, p.blockPosition(), SoundEvents.HOSTILE_BREATH, SoundSource.AMBIENT, 0.7f, 0.1f);
     }
 
-    private void corrupt(ServerPlayer p, ServerLevel l) {
-        BlockPos target = p.blockPosition().offset(l.random.nextInt(10)-5, -1, l.random.nextInt(10)-5);
-        if (!l.getBlockState(target).isAir() && history.size() < 150) {
+    private void spawnAnomaly(ServerPlayer p, ServerLevel l) {
+        BlockPos pos = p.blockPosition().offset(20 + l.random.nextInt(5), 0, 20 + l.random.nextInt(5));
+        AnomalyEntity e = new AnomalyEntity(ANOMALY, l);
+        e.setPos(pos.getX(), pos.getY(), pos.getZ());
+        l.addFreshEntity(e);
+    }
+
+    private void corrupt(ServerPlayer p, ServerLevel l, int ins) {
+        BlockPos target = p.blockPosition().offset(l.random.nextInt(8)-4, -1, l.random.nextInt(8)-4);
+        if (!l.getBlockState(target).isAir() && history.size() < 100) {
             history.putIfAbsent(target.immutable(), l.getBlockState(target));
             l.setBlockAndUpdate(target, Blocks.NETHERRACK.defaultBlockState());
         }
@@ -107,17 +117,11 @@ public class AnomalyMod implements ModInitializer {
         }
     }
 
-    private void spawnAnomaly(ServerPlayer p, ServerLevel l) {
-        BlockPos pos = p.blockPosition().offset(20, 0, 20);
-        AnomalyEntity e = new AnomalyEntity(ANOMALY, l);
-        e.setPos(pos.getX(), pos.getY(), pos.getZ());
-        l.addFreshEntity(e);
-    }
-
+    // --- ANOMALY ENTITY SINIFI ---
     public static class AnomalyEntity extends Zombie {
         public AnomalyEntity(EntityType<? extends Zombie> t, Level l) { super(t, l); }
         public static net.minecraft.world.entity.ai.attributes.AttributeSupplier.Builder createAttributes() {
-            return Zombie.createAttributes().add(Attributes.MAX_HEALTH, 600).add(Attributes.MOVEMENT_SPEED, 0.4);
+            return Zombie.createAttributes().add(Attributes.MAX_HEALTH, 600).add(Attributes.MOVEMENT_SPEED, 0.35);
         }
 
         @Override
@@ -126,11 +130,12 @@ public class AnomalyMod implements ModInitializer {
             if (this.level().isClientSide) return;
             ServerPlayer target = (ServerPlayer) getTarget();
             if (target != null) {
-                // Skini buradan çeker (Glitcli skin)
                 this.setCustomName(target.getName());
-                boolean looking = target.getViewVector(1.0f).dot(new Vec3(getX()-target.getX(), 0, getZ()-target.getZ()).normalize()) > 0.5;
-                getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(looking ? 0.1 : 0.9);
+                Vec3 look = target.getViewVector(1.0f).normalize();
+                Vec3 toEnt = new Vec3(getX()-target.getX(), 0, getZ()-target.getZ()).normalize();
+                boolean isLooking = look.dot(toEnt) > 0.45;
+                getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(isLooking ? 0.08 : 0.9);
             }
         }
     }
-}
+            }
