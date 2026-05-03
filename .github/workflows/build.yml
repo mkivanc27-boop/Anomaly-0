@@ -13,7 +13,7 @@ jobs:
       - name: Build
         run: chmod +x gradlew && ./gradlew build
       - name: Upload
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4 # BURASI v3'tü, HATAYI ÇÖZMEK İÇİN v4 YAPTIM
         with:
           name: Anomaly-JAR
           path: build/libs/*.jar
