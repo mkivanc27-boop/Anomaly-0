@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "anomaly_0",
+  "version": "1.0.0",
+  "name": "Anomaly 0",
+  "description": "A horror mod featuring the Anomaly entity.",
+  "authors": ["mbest700"],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/anomaly_0/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.mbest700.anomaly.AnomalyMod"
+    ]
+  },
+  "mixins": [
+    "anomaly_0.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.5",
+    "fabric-api": "*",
+    "minecraft": "~1.21.1"
+  }
+}
