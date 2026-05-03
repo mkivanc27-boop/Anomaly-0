@@ -1,0 +1,20 @@
+name: Build Anomaly Mod
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Build
+        run: chmod +x gradlew && ./gradlew build
+      - name: Upload
+        uses: actions/upload-artifact@v3
+        with:
+          name: Anomaly-JAR
+          path: build/libs/*.jar
+          
